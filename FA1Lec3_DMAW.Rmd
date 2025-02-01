@@ -1,0 +1,56 @@
+---
+title: "FA1Lec3_DMAW"
+author: "MORILLO, JADE MARCO S."
+date: "2025-02-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+```{r }
+filtered_diamonds <- diamonds %>%
+  filter(carat > 2, price < 5000)
+
+head(filtered_diamonds)
+```
+
+```{r }
+selected_diamonds <- diamonds %>%
+  select(carat, cut, price)
+
+head(selected_diamonds)
+```
+
+```{r }
+arranged_diamonds <- diamonds %>%
+  arrange(desc(price))
+
+head(arranged_diamonds)
+```
+
+```{r }
+mutated_diamonds <- diamonds %>%
+  mutate(price_per_carat = price / carat)
+
+head(mutated_diamonds)
+```
+
+```{r }
+summary_stats <- diamonds %>%
+  summarize(mean_price = mean(price),
+            max_price = max(price),
+            min_price = min(price))
+
+summary_stats
+```
+
+```{r }
+grouped_summary <- diamonds %>%
+  group_by(cut) %>%
+  summarize(mean_price = mean(price))
+
+grouped_summary
+```

@@ -1,0 +1,57 @@
+---
+title: "FA1Lec2_DMAW"
+author: "MORILLO, JADE MARCO S."
+date: "2025-02-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+```{r }
+data("diamonds")
+head(diamonds)
+```
+
+```{r }
+ggplot(diamonds, aes(x = cut)) +
+  geom_bar() +
+  labs(title = "Distribution of Diamond Cuts",
+       x = "Cut",
+       y = "Count")
+```
+
+```{r }
+ggplot(diamonds, aes(x = carat)) +
+  geom_histogram(binwidth = 0.1) +
+  labs(title = "Distribution of Carat",
+       x = "Carat",
+       y = "Count")
+```
+
+```{r }
+ggplot(diamonds, aes(x = x, y = y)) +
+  geom_point(alpha = 0.1) +
+  labs(title = "Scatter Plot of Diamond Dimensions",
+       x = "Length (x)",
+       y = "Width (y)")
+```
+
+```{r }
+ggplot(diamonds, aes(x = cut, y = price)) +
+  geom_boxplot() +
+  labs(title = "Price Distribution by Cut",
+       x = "Cut",
+       y = "Price")
+```
+
+```{r }
+ggplot(diamonds, aes(x = carat, y = price)) +
+  geom_point(alpha = 0.1) +
+  facet_wrap(~ cut) +
+  labs(title = "Price vs. Carat by Cut",
+       x = "Carat",
+       y = "Price")
+```

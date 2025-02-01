@@ -1,0 +1,59 @@
+---
+title: "FA1Lec4_DMAW"
+author: "MORILLO, JADE MARCO S."
+date: "2025-02-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+```{r }
+table4a <- tibble(
+  country = c("Afghanistan", "Brazil", "China"),
+  `1999` = c(745, 37737, 212258),
+  `2000` = c(2666, 80488, 213766)
+)
+
+long_table4a <- table4a %>%
+  pivot_longer(cols = c(`1999`, `2000`), names_to = "year", values_to = "cases")
+
+long_table4a
+```
+
+```{r }
+wide_table4a <- long_table4a %>%
+  pivot_wider(names_from = year, values_from = cases)
+
+wide_table4a
+```
+
+```{r }
+table4b <- tibble(
+  country = c("Afghanistan", "Brazil", "China"),
+  `1999` = c(19987071, 172006362, 1272915272),
+  `2000` = c(20595360, 174504898, 1280428583)
+)
+
+long_table4b <- table4b %>%
+  pivot_longer(cols = c(`1999`, `2000`), names_to = "year", values_to = "population")
+
+joined_table <- left_join(long_table4a, long_table4b, by = c("country", "year"))
+
+joined_table
+```
+
+```{r }
+stocks <- tibble(
+  year = c(2015, 2015, 2015, 2015, 2016, 2016, 2016),
+  qtr = c(1, 2, 3, 4, 2, 3, 4),
+  return = c(1.88, 0.59, 0.35, NA, 0.92, 0.17, 2.66)
+)
+
+cleaned_stocks <- stocks %>%
+  na.omit()
+
+cleaned_stocks
+```
