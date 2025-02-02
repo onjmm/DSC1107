@@ -23,6 +23,8 @@ ggplot(diamonds, aes(x = cut)) +
        y = "Count")
 ```
 
+The bar graph shows that ideal was the most common cut of diamond while fair cut was the least popular.
+
 ```{r }
 ggplot(diamonds, aes(x = carat)) +
   geom_histogram(binwidth = 0.1) +
@@ -31,13 +33,18 @@ ggplot(diamonds, aes(x = carat)) +
        y = "Count")
 ```
 
+The histogram reveals that the carats are mostly between 0.2 to 1.0, with most being 0.3 carat.
+
 ```{r }
 ggplot(diamonds, aes(x = x, y = y)) +
-  geom_point(alpha = 0.1) +
-  labs(title = "Scatter Plot of Diamond Dimensions",
+  geom_point(alpha = 0.05, color = "purple") +  # Lower alpha for better visibility
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Scatter Plot of Diamond Dimensions (All Data)",
        x = "Length (x)",
        y = "Width (y)")
 ```
+
+Most diamond have similar length and width as seen by the red line, representing the 'x=y' line.
 
 ```{r }
 ggplot(diamonds, aes(x = cut, y = price)) +
@@ -47,6 +54,8 @@ ggplot(diamonds, aes(x = cut, y = price)) +
        y = "Price")
 ```
 
+Surprisingly, the better the cut of the diamonds are, the lower the median price is, with the premium cut being an exception as it is priced around the same as the fair cut.
+
 ```{r }
 ggplot(diamonds, aes(x = carat, y = price)) +
   geom_point(alpha = 0.1) +
@@ -55,3 +64,5 @@ ggplot(diamonds, aes(x = carat, y = price)) +
        x = "Carat",
        y = "Price")
 ```
+
+This plot shows a better picture of how diamonds are priced as it is directly proportional with the carat of the diamond.

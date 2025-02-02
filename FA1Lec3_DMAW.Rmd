@@ -12,10 +12,12 @@ library(tidyverse)
 
 ```{r }
 filtered_diamonds <- diamonds %>%
-  filter(carat > 2, price < 5000)
+  filter(carat > 1.7, price < 5000)
 
 head(filtered_diamonds)
 ```
+
+It can be observed that there are only a single available diamond that is at least 1.7 carats and priced under 5000.
 
 ```{r }
 selected_diamonds <- diamonds %>%
@@ -24,6 +26,8 @@ selected_diamonds <- diamonds %>%
 head(selected_diamonds)
 ```
 
+This shows three of the most useful variables when trading diamonds, helping both sellers and buyers to easily negotiate.
+
 ```{r }
 arranged_diamonds <- diamonds %>%
   arrange(desc(price))
@@ -31,12 +35,16 @@ arranged_diamonds <- diamonds %>%
 head(arranged_diamonds)
 ```
 
+It is revealed that the most expensive  is priced at 18,823 which is a premium cut 2.29-carat diamond.
+
 ```{r }
 mutated_diamonds <- diamonds %>%
   mutate(price_per_carat = price / carat)
 
 head(mutated_diamonds)
 ```
+
+This added a new column that reveals the price per carat of each diamond with the first one priced at 1,417 per carat.
 
 ```{r }
 summary_stats <- diamonds %>%
@@ -47,6 +55,8 @@ summary_stats <- diamonds %>%
 summary_stats
 ```
 
+The mean price of all the diamonds is 3,933, with the most expensive being priced at 18,823 while the cheapest is 326.
+
 ```{r }
 grouped_summary <- diamonds %>%
   group_by(cut) %>%
@@ -54,3 +64,5 @@ grouped_summary <- diamonds %>%
 
 grouped_summary
 ```
+
+This shows that the mean price of premium is the highest among other cuts, while the ideal being the lowest.

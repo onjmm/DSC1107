@@ -22,6 +22,18 @@ long_table4a <- table4a %>%
 
 long_table4a
 ```
+```{r }
+long_table4a %>%
+  ggplot(aes(x = year, y = cases, fill = country)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Cases by Country and Year (Long Format)",
+       x = "Year",
+       y = "Cases",
+       fill = "Country") +
+  theme_minimal()
+```
+
+This format has one row per year per country, making it easier to analyze between the countries per year. For this, China's cases were way higher while Afghanistan's were way lower when compared to Brazil.
 
 ```{r }
 wide_table4a <- long_table4a %>%
@@ -29,6 +41,20 @@ wide_table4a <- long_table4a %>%
 
 wide_table4a
 ```
+```{r }
+table4a %>%
+  pivot_longer(cols = c(`1999`, `2000`), names_to = "year", values_to = "cases") %>%
+  ggplot(aes(x = year, y = cases, color = country, group = country)) +
+  geom_line(size = 1) +
+  geom_point(size = 3) +
+  labs(title = "Cases Over Time (Wide to Long Transformation)",
+       x = "Year",
+       y = "Cases",
+       color = "Country") +
+  theme_minimal()
+```
+
+Putting the country in just a single row eases data comparison as it can be viewed side-by-side. As seen in the visualization, the cases in China and Afghanistan is almost flat but for Brazil, it increased by a lot.
 
 ```{r }
 table4b <- tibble(
@@ -44,6 +70,19 @@ joined_table <- left_join(long_table4a, long_table4b, by = c("country", "year"))
 
 joined_table
 ```
+```{r }
+joined_table %>%
+  ggplot(aes(x = year, y = cases/population, color = country, group = country)) +
+  geom_line(size = 1) +
+  geom_point(size = 3) +
+  labs(title = "Cases per Capita Over Time (Joined Data)",
+       x = "Year",
+       y = "Cases per Capita",
+       color = "Country") +
+  theme_minimal()
+```
+
+The population column was added which could be used to further analyze the data. On this graph, it can be seen that the rise of cases in Afghanistan is actually much bigger, considering their population, than what the prior graph shows.
 
 ```{r }
 stocks <- tibble(
@@ -57,3 +96,15 @@ cleaned_stocks <- stocks %>%
 
 cleaned_stocks
 ```
+```{r }
+cleaned_stocks %>%
+  ggplot(aes(x = factor(qtr), y = return, color = factor(year))) +
+  geom_point(size = 4) +
+  labs(title = "Stock Returns by Quarter (After Handling Missing Values)",
+       x = "Quarter",
+       y = "Return",
+       color = "Year") +
+  theme_minimal()
+```
+
+The row without any value for return was removed, leaving just complete cases. It can be observed that the peak return was in the last quarter of 2016 while the lowest was the 3rd quarter of the same year.
