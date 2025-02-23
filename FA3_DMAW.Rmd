@@ -1,0 +1,83 @@
+---
+title: "FA3_DMAW"
+author: "MORILLO, JADE MARCO S."
+date: "2025-02-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries}
+library(tidyverse)
+library(ggrepel)
+library(kableExtra)
+library(cowplot)
+library(zoo)
+```
+
+```{r dataset}
+load("C:/Users/Dindette/Downloads/ml_pay.rdata")
+
+glimpse(ml_pay)
+
+head(ml_pay) %>% kable() %>% kable_styling()
+```
+
+```{r }
+ml_pay_long <- ml_pay %>%
+  pivot_longer(cols = starts_with("p"), names_to = "Year", values_to = "Payroll") %>%
+  pivot_longer(cols = starts_with("X"), names_to = "WinType", values_to = "Wins") %>%
+  filter(str_sub(Year, 2, 5) == str_sub(WinType, 2, 5)) %>%
+  mutate(Year = as.integer(str_sub(Year, 2, 5)))
+
+glimpse(ml_pay_long)
+```
+
+```{r }
+summary_table <- ml_pay %>%
+  summarise(
+    Avg_Payroll = mean(payroll, na.rm = TRUE),
+    Median_Payroll = median(payroll, na.rm = TRUE),
+    Avg_WinPct = mean(avgwin, na.rm = TRUE),
+    Median_WinPct = median(avgwin, na.rm = TRUE)
+  )
+
+summary_table %>% kable() %>% kable_styling()
+```
+
+```{r }
+ggplot(ml_pay, aes(x = payroll, y = avgwin, label = Team.name.2014)) +
+  geom_point(color = "blue", alpha = 0.7, size = 3) +
+  geom_text_repel(size = 3) +
+  labs(title = "MLB Team Payroll vs. Win Percentage",
+       x = "Total Payroll (Billions USD)",
+       y = "Win Percentage") +
+  theme_minimal()
+```
+
+```{r }
+ggplot(ml_pay_long, aes(x = Year, y = Payroll, group = Team.name.2014, color = Team.name.2014)) +
+  geom_line(alpha = 0.5) +
+  labs(title = "Payroll Trends (1998-2014)", x = "Year", y = "Payroll (Millions USD)") +
+  theme_minimal()
+```
+
+```{r }
+ml_pay_long <- ml_pay_long %>%
+  group_by(Team.name.2014, Year) %>%
+  summarise(Wins = mean(Wins, na.rm = TRUE), .groups = "drop")  # Ensure one row per team-year
+
+ml_pay_long <- ml_pay_long %>%
+  complete(Team.name.2014, Year = full_seq(Year, 1)) %>%
+  arrange(Team.name.2014, Year) %>%
+  group_by(Team.name.2014) %>%
+  mutate(Wins = ifelse(!is.na(Wins), Wins, zoo::na.approx(Wins, na.rm = FALSE))) %>%
+  ungroup()
+
+ggplot(ml_pay_long, aes(x = Year, y = Wins, group = Team.name.2014, color = Team.name.2014)) +
+  geom_line(alpha = 0.6) +
+  labs(title = "Win Trends (1998-2014)", x = "Year", y = "Wins") +
+  theme_minimal()
+```
