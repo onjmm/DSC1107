@@ -7,77 +7,224 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-```
-
-```{r libraries}
 library(tidyverse)
 library(ggrepel)
 library(kableExtra)
 library(cowplot)
-library(zoo)
 ```
 
-```{r dataset}
+# 1. Wrangle
+
+## 1.1 Import (5 points)
+**The dataset contains 30 rows (one per team) and 57 columns. This matches the expected format described in the problem statement.**
+
+### Solution
+
+```{r import}
 load("C:/Users/Dindette/Downloads/ml_pay.rdata")
 
-glimpse(ml_pay)
+dataset_name <- ls()
 
-head(ml_pay) %>% kable() %>% kable_styling()
+mlb_raw <- as_tibble(get(dataset_name))
+
+print(mlb_raw)
+
+num_rows <- nrow(mlb_raw)
+num_cols <- ncol(mlb_raw)
+
+cat("Number of rows:", num_rows, "\n")
+cat("Number of columns:", num_cols, "\n")
+
+print(colnames(mlb_raw))
 ```
 
-```{r }
-ml_pay_long <- ml_pay %>%
-  pivot_longer(cols = starts_with("p"), names_to = "Year", values_to = "Payroll") %>%
-  pivot_longer(cols = starts_with("X"), names_to = "WinType", values_to = "Wins") %>%
-  filter(str_sub(Year, 2, 5) == str_sub(WinType, 2, 5)) %>%
-  mutate(Year = as.integer(str_sub(Year, 2, 5)))
+## 1.2 Tidy (15 points)
+**The mlb_aggregate tibble has 30 rows because there is one row per team. The mlb_yearly tibble has 510 rows because there are 30 teams and 17 years of data per team.**
 
-glimpse(ml_pay_long)
-```
+### Solution
 
-```{r }
-summary_table <- ml_pay %>%
-  summarise(
-    Avg_Payroll = mean(payroll, na.rm = TRUE),
-    Median_Payroll = median(payroll, na.rm = TRUE),
-    Avg_WinPct = mean(avgwin, na.rm = TRUE),
-    Median_WinPct = median(avgwin, na.rm = TRUE)
+```{r tidy}
+if (!"payroll" %in% colnames(mlb_raw)) {
+  stop("Error: 'payroll' column not found in mlb_raw. Check column names.")
+}
+if (!"avgwin" %in% colnames(mlb_raw)) {
+  stop("Error: 'avgwin' column not found in mlb_raw. Check column names.")
+}
+
+mlb_aggregate <- mlb_raw %>%
+  select(Team.name.2014, payroll, avgwin) %>%
+  rename(
+    team = Team.name.2014,
+    payroll_aggregate = payroll,
+    pct_wins_aggregate = avgwin
   )
 
-summary_table %>% kable() %>% kable_styling()
+print(head(mlb_aggregate))
+
+cat("Number of rows in mlb_aggregate:", nrow(mlb_aggregate), "\n")
+
+payroll_cols <- grep("^p\\d{4}$", names(mlb_raw), value = TRUE)
+win_cols <- grep("^X\\d{4}$", names(mlb_raw), value = TRUE)
+win_pct_cols <- grep("^X\\d{4}\\.pct$", names(mlb_raw), value = TRUE)
+
+mlb_yearly <- mlb_raw %>%
+  select(Team.name.2014, all_of(payroll_cols), all_of(win_cols), all_of(win_pct_cols)) %>%
+  pivot_longer(
+    cols = -Team.name.2014,
+    names_to = "column_name",
+    values_to = "value"
+  ) %>%
+  mutate(
+    year = str_extract(column_name, "\\d{4}"),
+    type = case_when(
+      str_starts(column_name, "p") ~ "payroll",
+      str_ends(column_name, "pct") ~ "pct_wins",
+      TRUE ~ "num_wins"
+    )
+  ) %>%
+  select(-column_name) %>%
+  pivot_wider(names_from = type, values_from = value) %>%
+  rename(team = Team.name.2014)
+
+print(head(mlb_yearly))
+
+cat("Number of rows in mlb_yearly:", nrow(mlb_yearly), "\n")
 ```
 
-```{r }
-ggplot(ml_pay, aes(x = payroll, y = avgwin, label = Team.name.2014)) +
-  geom_point(color = "blue", alpha = 0.7, size = 3) +
-  geom_text_repel(size = 3) +
-  labs(title = "MLB Team Payroll vs. Win Percentage",
-       x = "Total Payroll (Billions USD)",
+## 1.3 Quality Control (15 points)
+
+### Solution
+
+```{r quality control}
+# Ensure mlb_aggregate exists
+if (!exists("mlb_aggregate")) {
+  stop("Error: mlb_aggregate was not found. Ensure it is created before running this section.")
+}
+
+mlb_aggregate_computed <- mlb_yearly %>%
+  group_by(team) %>%
+  summarize(
+    payroll_aggregate_computed = sum(payroll, na.rm = TRUE),
+    pct_wins_aggregate_computed = mean(pct_wins, na.rm = TRUE)
+  )
+
+mlb_aggregate_joined <- mlb_aggregate %>%
+  inner_join(mlb_aggregate_computed, by = "team")
+
+payroll_plot <- ggplot(mlb_aggregate_joined, aes(x = payroll_aggregate, y = payroll_aggregate_computed)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  geom_text_repel(aes(label = team), size = 3) +
+  labs(x = "Provided Payroll Aggregate", y = "Computed Payroll Aggregate") +
+  theme_minimal()
+
+wins_plot <- ggplot(mlb_aggregate_joined, aes(x = pct_wins_aggregate, y = pct_wins_aggregate_computed)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  geom_text_repel(aes(label = team), size = 3) +
+  labs(x = "Provided Win Percentage Aggregate", y = "Computed Win Percentage Aggregate") +
+  theme_minimal()
+
+plot_grid(payroll_plot, wins_plot, labels = "AUTO")
+```
+
+# 2. Explore
+
+## 2.1 Payroll Across Years (15 points)
+**The payroll_aggregate_computed metric represents the total payroll expenditure of each team over the years and this is reflected in the Payroll Trends by Team plot through the height of the payroll values in each team’s panel, where teams like the New York Yankees, Boston Red Sox, and Los Angeles Dodgers display consistently high payroll levels. While the pct_increase metric measures the percentage growth in payroll from 1998 to 2014, it is visible in the plot through the steepness of the payroll trend lines that teams like the Washington Nationals, Detroit Tigers, and Philadelphia Phillies show sharp increases over time. The identification of the top three teams in payroll_aggregate_computed, which are the New York Yankees, Boston Red Sox, Los Angeles Dodgers, is evident in the plot as their payroll trends remain among the highest across the years, while the top three teams in pct_increase, which are the Washington Nationals, Detroit Tigers, Philadelphia Phillies, are recognizable by their steep upward trajectory, indicating significant payroll growth over time.**
+
+### Solution
+
+```{r payroll across years}
+ggplot(mlb_yearly, aes(x = as.numeric(year), y = payroll, group = team)) +
+  geom_line() +
+  facet_wrap(~ team) +
+  geom_hline(aes(yintercept = mean(payroll, na.rm = TRUE)), color = "red", linetype = "dashed") +
+  labs(title = "Payroll Trends by Team", x = "Year", y = "Payroll (millions)")
+
+top_teams_payroll <- mlb_yearly %>%
+  group_by(team) %>%
+  summarize(payroll_aggregate_computed = sum(payroll, na.rm = TRUE)) %>%
+  arrange(desc(payroll_aggregate_computed)) %>%
+  head(3)
+
+kable(top_teams_payroll)
+
+payroll_wide <- mlb_yearly %>%
+  pivot_wider(names_from = year, values_from = payroll, names_prefix = "payroll_") %>%
+  group_by(team) %>%
+  summarize(across(starts_with("payroll_"), \(x) mean(x, na.rm = TRUE)))  
+
+top_increase <- payroll_wide %>%
+  filter(!is.na(payroll_1998) & !is.na(payroll_2014)) %>%
+  mutate(pct_increase = (payroll_2014 - payroll_1998) / payroll_1998 * 100) %>%
+  arrange(desc(pct_increase)) %>%
+  select(team, payroll_1998, payroll_2014, pct_increase) %>%
+  head(3)
+
+kable(top_increase)
+```
+
+## 2.2 Win Percentage Across Years (15 points)
+**The metric pct_wins_aggregate_computed is reflected in the win percentage trends plot by showing teams with consistently high winning percentages over time, with the New York Yankees, Atlanta Braves, and Boston Red Sox maintaining win percentages above the league average across most seasons. The pct_wins_sd metric represents the standard deviation of win percentages with the Houston Astros, Detroit Tigers, and Seattle Mariners exhibiting more variation in their win percentages across different years. The top three teams in pct_wins_aggregate_computed can be identified in the plot by their relatively stable and high win percentages, while the top three teams in pct_wins_sd can be recognized by their noticeable fluctuations, confirming the rankings in the tables.**
+
+### Solution
+
+```{r win percentage across years}
+ggplot(mlb_yearly, aes(x = as.numeric(year), y = pct_wins, group = team)) +
+  geom_line() +
+  facet_wrap(~ team) +
+  geom_hline(aes(yintercept = mean(pct_wins, na.rm = TRUE)), color = "red", linetype = "dashed") +
+  labs(title = "Win Percentage Trends by Team", x = "Year", y = "Win Percentage")
+
+top_teams <- mlb_yearly %>%
+  group_by(team) %>%
+  summarize(pct_wins_aggregate_computed = mean(pct_wins, na.rm = TRUE)) %>%
+  arrange(desc(pct_wins_aggregate_computed)) %>%
+  head(3)
+
+kable(top_teams)
+
+erratic_teams <- mlb_yearly %>%
+  group_by(team) %>%
+  summarize(pct_wins_sd = sd(pct_wins, na.rm = TRUE)) %>%
+  arrange(desc(pct_wins_sd)) %>%
+  head(3)
+
+kable(erratic_teams)
+```
+
+## 2.3 Win Percentage Versus Payroll (15 points)
+
+**The relationship between payroll and pct_wins is positive, as seen in the upward-sloping trend line in the scatter plot where teams with higher payrolls tend to have higher win percentages which is expected because teams with larger payrolls can afford to sign more skilled and experienced players. However, while the trend is generally positive, there are exceptions where lower-payroll teams perform well and higher-payroll teams underperform.**
+
+### Solution
+
+```{r win percentage versus payroll}
+library(ggplot2)
+library(ggrepel)
+
+ggplot(mlb_aggregate, aes(x = payroll_aggregate, y = pct_wins_aggregate)) +
+  geom_point() +
+  geom_text_repel(aes(label = team), max.overlaps = 50) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(title = "Win Percentage vs. Payroll", 
+       x = "Payroll (Billions)", 
        y = "Win Percentage") +
   theme_minimal()
 ```
 
-```{r }
-ggplot(ml_pay_long, aes(x = Year, y = Payroll, group = Team.name.2014, color = Team.name.2014)) +
-  geom_line(alpha = 0.5) +
-  labs(title = "Payroll Trends (1998-2014)", x = "Year", y = "Payroll (Millions USD)") +
-  theme_minimal()
-```
+## Win Percentage Versus Payroll
 
-```{r }
-ml_pay_long <- ml_pay_long %>%
-  group_by(Team.name.2014, Year) %>%
-  summarise(Wins = mean(Wins, na.rm = TRUE), .groups = "drop")  # Ensure one row per team-year
+**The three teams appear efficient in the previous plot because they achieve relatively high win percentages despite having lower total payrolls compared to other teams. These teams get more wins per dollar spent and that is why they were positioned above the trend line in the previous plot.**
 
-ml_pay_long <- ml_pay_long %>%
-  complete(Team.name.2014, Year = full_seq(Year, 1)) %>%
-  arrange(Team.name.2014, Year) %>%
-  group_by(Team.name.2014) %>%
-  mutate(Wins = ifelse(!is.na(Wins), Wins, zoo::na.approx(Wins, na.rm = FALSE))) %>%
-  ungroup()
+### Solution
 
-ggplot(ml_pay_long, aes(x = Year, y = Wins, group = Team.name.2014, color = Team.name.2014)) +
-  geom_line(alpha = 0.6) +
-  labs(title = "Win Trends (1998-2014)", x = "Year", y = "Wins") +
-  theme_minimal()
+```{r team efficiency}
+efficiency <- mlb_aggregate_computed %>%
+  mutate(efficiency = pct_wins_aggregate_computed / payroll_aggregate_computed) %>%
+  arrange(desc(efficiency)) %>%
+  head(3)
+
+kable(efficiency)
 ```
