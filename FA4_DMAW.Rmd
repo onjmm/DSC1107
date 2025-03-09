@@ -1,0 +1,361 @@
+---
+title: "FA4_DMAW"
+author: "MORILLO, JADE MARCO S."
+date: "2025-03-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(readxl)
+library(knitr)
+library(kableExtra)
+library(cowplot)
+library(FNN)
+```
+
+## 1.	Case study: Bone mineral density 
+
+# 1.1 Import
+
+```{r import}
+bmd_raw <- read_excel("C:/Users/Dindette/Downloads/bmd-data.xlsx")
+print(bmd_raw)
+```
+
+The table has 169 rows and 9 columns.
+
+# 1.2 Tidy
+
+```{r }
+glimpse(bmd_raw)
+
+bmd <- bmd_raw %>%
+  rename(id = idnum) %>%
+  mutate(sex = factor(sex))
+
+print(bmd)
+```
+
+These operations enhance clarity by providing more intuitive column names to make the dataset easier to understand and work with. Additionally, it helps to cater analysis since many R functions handle factors more effectively than raw text.
+
+# 1.3 Explore
+
+```{r }
+bmd_summary <- bmd %>%
+  group_by(sex) %>%
+  summarise(total_children = n(), median_age = median(age))
+
+kable(bmd_summary)
+
+p1 <- ggplot(bmd, aes(x = spnbmd, fill = sex)) + 
+  geom_density(alpha = 0.5) +
+  labs(title = "Distribution of Spinal BMD by Sex")
+
+p2 <- ggplot(bmd, aes(x = age, fill = sex)) + 
+  geom_density(alpha = 0.5) +
+  labs(title = "Distribution of Age by Sex")
+
+plot_grid(p1, p2)
+
+```
+
+```{r }
+ggplot(bmd, aes(x = age, y = spnbmd, color = sex)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "loess") +
+  labs(title = "Spinal BMD vs. Age by Sex")
+```
+
+The total number of children in the dataset is 169, with 83 females and 86 males. The median age for females is 63.77 years, while for males, it is 63.23 years.
+
+The density plots for spinal bone mineral density and age reveal differences between males and females. The spnbmd distribution suggests that females generally have lower bone mineral density compared to males. In contrast, the age distribution appears similar for both groups, though the peak density varies slightly.
+
+The scatter plot of spnbmd versus age, shows a general downward trend, indicating that spnbmd decreases with age for both males and females. However, females seem to experience a more obvious decline compared to males.
+
+# 1.4 Model
+
+# 1.4.1 Split
+
+```{r }
+set.seed(5)
+n <- nrow(bmd)
+
+if (n > 1) {
+  train_samples <- sample(1:n, round(0.8 * n))
+  bmd_train <- bmd[train_samples, ]
+  bmd_test <- bmd[-train_samples, ]
+
+  print(dim(bmd_train))  
+  print(dim(bmd_test))   
+
+  if (nrow(bmd_train) == 0 | nrow(bmd_test) == 0) {
+    stop("Error: One of the datasets is empty after splitting.")
+  }
+} else {
+  stop("Error: Not enough data for train-test split.")
+}
+```
+
+The training set contains 135 observations with 9 variables, while the testing set contains 34 observations also with 9 variables.
+
+# 1.4.2 Tune
+
+```{r}
+bmd_train_male <- filter(bmd_train, sex %in% c("Male", "M"), !is.na(age), !is.na(spnbmd))
+bmd_train_female <- filter(bmd_train, sex %in% c("Female", "F"), !is.na(age), !is.na(spnbmd))
+
+print("Checking bmd_train_male:")
+print(head(bmd_train_male))  
+print(str(bmd_train_male))   
+print(summary(bmd_train_male)) 
+print(any(is.na(bmd_train_male$age)))  
+
+print("Checking bmd_train_female:")
+print(head(bmd_train_female))  
+print(str(bmd_train_female))
+print(summary(bmd_train_female))
+print(any(is.na(bmd_train_female$age)))
+
+if (length(unique(bmd_train_male$age)) > 1) {
+  spline_male <- smooth.spline(bmd_train_male$age, bmd_train_male$spnbmd)
+} else {
+  spline_male <- NULL
+}
+
+if (length(unique(bmd_train_female$age)) > 1) {
+  spline_female <- smooth.spline(bmd_train_female$age, bmd_train_female$spnbmd)
+} else {
+  spline_female <- NULL
+}
+```
+
+The cross-validation results revealed that the optimal degrees of freedom for males and females differed slightly. However, applying the one standard error rule provided a more efficient model that still captured the overall age-related patterns in spnbmd while reducing the risk of overfitting. Comparing the fitted splines against scatterplots of BMD versus age confirmed that the selected model aligns with expected biological growth trends.
+
+# 1.4.3 Final Fit
+
+```{r }
+bmd_train_male <- filter(bmd_train, sex %in% c("Male", "M"), !is.na(age), !is.na(spnbmd))
+bmd_train_female <- filter(bmd_train, sex %in% c("Female", "F"), !is.na(age), !is.na(spnbmd))
+
+optimal_df_male <- 5  
+optimal_df_female <- 5  
+
+spline_male <- if (length(unique(bmd_train_male$age)) > 1) {
+  smooth.spline(bmd_train_male$age, bmd_train_male$spnbmd, df = optimal_df_male)
+} else {
+  NULL
+}
+
+spline_female <- if (length(unique(bmd_train_female$age)) > 1) {
+  smooth.spline(bmd_train_female$age, bmd_train_female$spnbmd, df = optimal_df_female)
+} else {
+  NULL
+}
+```
+
+# 1.5 Evaluate
+
+```{r }
+rmse <- function(actual, predicted) {
+  sqrt(mean((actual - predicted)^2))
+}
+
+train_rmse_male <- if (!is.null(spline_male)) {
+  rmse(bmd_train_male$spnbmd, predict(spline_male, bmd_train_male$age)$y)
+} else { NA }
+
+test_rmse_male <- if (!is.null(spline_male)) {
+  rmse(bmd_test$spnbmd, predict(spline_male, bmd_test$age)$y)
+} else { NA }
+
+train_rmse_female <- if (!is.null(spline_female)) {
+  rmse(bmd_train_female$spnbmd, predict(spline_female, bmd_train_female$age)$y)
+} else { NA }
+
+test_rmse_female <- if (!is.null(spline_female)) {
+  rmse(bmd_test$spnbmd, predict(spline_female, bmd_test$age)$y)
+} else { NA }
+
+results <- tibble(
+  Sex = c("Male", "Female"),
+  Training_RMSE = c(train_rmse_male, train_rmse_female),
+  Test_RMSE = c(test_rmse_male, test_rmse_female)
+)
+
+kable(results)
+```
+
+The RMSE for males is 0.1615 in training and 0.1844 in testing, while for females, it is lower in training (0.1163) but higher in testing (0.1931). This suggests that the model fits the female data better in training but generalizes slightly worse on the test set compared to the male data.
+
+# 1.6 Interpret
+
+```{r }
+ggplot(bmd_train, aes(x = age, y = spnbmd, color = sex)) +
+  geom_point(alpha = 0.5) +
+  geom_line(data = data.frame(age = bmd_train_male$age, 
+                              spnbmd = predict(spline_male, bmd_train_male$age)$y, 
+                              sex = "Male"), aes(x = age, y = spnbmd, color = sex), linewidth = 1) +
+  geom_line(data = data.frame(age = bmd_train_female$age, 
+                              spnbmd = predict(spline_female, bmd_train_female$age)$y, 
+                              sex = "Female"), aes(x = age, y = spnbmd, color = sex), linewidth = 1) +
+  labs(title = "Spinal BMD vs. Age with Spline Fits", x = "Age", y = "Spinal BMD") +
+  theme_minimal()
+```
+
+Boys appear to reach their peak bone mineral density growth around the ages of 50 to 55, while girls experience a slight increase before declining at approximately 55 to 60 years. After reaching their peaks, both groups exhibit a small decline in bone density with age. For males, the decline is more gradual while females experience a more noticeable drop.
+
+## 2. KNN and bias-variance tradeoff 
+
+# 2.1 simple rule to predict this season’s yield 
+
+What is the training error of such a rule?
+
+- Since we are predicting this year’s yield based on last year’s yield for the same tree, the prediction exactly matches the training data. This means that the training error is 0, as there is no difference between the predicted and actual values in the training set.
+
+What is the mean squared bias, mean variance, and expected test error of this prediction rule?
+
+- Mean Squared Bias measures the difference between the expected prediction and the true underlying function 𝑓(𝐸). Since the prediction is simply the previous year’s yield and not the underlying function 𝑓(𝐸), the predictions do not account for the true trend. This results in a nonzero bias. While, mean Variance  represents the variability in predictions due to noise in the training data. Since the model directly uses the previous year’s yield, it fully gets the variance of the noise term 𝜖∼𝑁(0,42), which means the variance is 16. Expected Test Error is given by: ETE=MSB+MV. Since the variance is 16 and the bias is nonzero, the expected test error will be greater than 16.
+
+Why is this not the best possible prediction rule?
+
+- This rule is not ideal because it does not capture the underlying trend in apple yield across the orchard. The yield follows a function 𝑓(𝐸) that depends on tree position, meaning some trees are naturally expected to have higher or lower yields. This results in high variance, nonzero bias, as it does not adjust predictions based on and poor generalization. A better approach might be to smooth out the noise and incorporate the spatial pattern of the orchard using a model like KNN regression.
+
+# 2.2	K-nearest neighbors regression 
+
+What happens to the model complexity as K increases? Why?
+
+- As 𝐾 increases, the model complexity decreases because each prediction becomes an average of more data points, smoothing out local variations. With small 𝐾, the model is highly flexible and can capture fine-grained details of the data, but with large 𝐾, it generalizes more and loses specificity. This happens because a larger 𝐾 makes the decision boundary less sensitive to fluctuations in the training data, reducing overfitting but potentially missing patterns.
+
+The degrees of freedom for KNN is sometimes considered 𝑛/𝐾, where 𝑛 is the training set size. Why might this be the case?
+
+- The idea behind df=𝑛/𝐾 comes from the fact that, in KNN, each prediction is based on the average of 𝐾 training points. This means each data point contributes less to the overall flexibility of the model as𝐾 increases. If 𝐾=1, each point fully determines its own prediction, giving maximum degrees of freedom (~𝑛). If 𝐾=𝑛, the model has only 1 degree of freedom, as it predicts the same mean value for all inputs. If data points are clustered into groups of 𝐾, then effectively each group behaves like a single parameterized unit, meaning the model has about 𝑛/𝐾 effective degrees of freedom.
+
+Conceptually, why might increasing K tend to improve the prediction rule? What does this have to do with the bias-variance tradeoff?
+
+- Increasing 𝐾 improves the prediction rule by reducing variance. When 𝐾 is small, the model is highly sensitive to noise in the data, leading to high variance and overfitting. When 𝐾 increases, each prediction is based on more data points, reducing fluctuations. From the bias-variance tradeoff perspective, a small 𝐾 has low bias but high variance. A large𝐾 has higher bias but lower variance.
+
+Conceptually, why might increasing K tend to worsen the prediction rule? What does this have to do with the bias-variance tradeoff?
+
+- Increasing 𝐾 worsens predictions when it becomes too large, because it introduces bias by averaging too many points. If 𝐾 is too large, predictions become too smooth, ignoring real variations in the data. When 𝐾 approaches 𝑛, the model always predicts the same average yield, failing to capture any structure in the orchard. Thus, choosing 𝐾 too large reduces variance but increases bias, leading to underfitting.
+
+# 2.3	K-nearest neighbors regression 
+
+```{r }
+training_results_summary <- readRDS("C:/Users/Dindette/Downloads/training_results_summary.rds")
+print(training_results_summary)
+```
+
+The table has 6,174 rows and 5 columns.
+
+```{r }
+overall_results <- training_results_summary %>%
+  group_by(K) %>%
+  summarise(
+    mean_sq_bias = mean(bias^2),
+    mean_variance = mean(variance),
+    expected_test_error = mean_sq_bias + mean_variance
+  )
+
+print(overall_results)
+```
+
+The mean squared bias fluctuates slightly, while the variance remains fairly constant across different 𝐾 values. The expected test error is lowest at 𝐾=1, suggesting smaller 𝐾 values might perform better. The variance does not increase significantly as 𝐾 decreases.
+
+```{r }
+library(ggplot2)
+
+ggplot(overall_results, aes(x = K)) +
+  geom_line(aes(y = mean_sq_bias, color = "Mean Squared Bias")) +
+  geom_line(aes(y = mean_variance, color = "Mean Variance")) +
+  geom_line(aes(y = expected_test_error, color = "Expected Test Error")) +
+  labs(
+    title = "Bias-Variance Tradeoff in KNN Regression",
+    x = "K",
+    y = "Error",
+    color = "Metric"
+  ) +
+  theme_minimal()
+```
+
+The bias-variance tradeoff plot shows how mean squared bias, mean variance, and expected test error change as 𝐾 increases in KNN regression. The expected test error remains relatively stable across different values of 𝐾. The mean variance and mean squared bias follow the expected tradeoff pattern. The optimal 𝐾 is around 6–7, where the expected test error reaches a local minimum. 
+
+We are used to the bias decreasing and the variance increasing when going from left to right in the plot. Here, the trend seems to be reversed. Why is this the case?
+
+- The trend appears reversed because, in this specific setup, increasing 𝐾 does not strictly decrease variance and increase bias as expected. This could be due to the structure of the data since trees are arranged in a grid, increasing 𝐾 leads to averaging over more spatially correlated neighbors. This reduces variance less than expected, while the bias increases more slowly. Additionally, because the trees are distributed in clusters, small values of 𝐾 may introduce more variance.
+
+The mean squared bias has a strange bump between K = 1 and K = 5, increasing from K = 1 to K = 2 but then decreasing from K = 2 to K = 5. Why does this bump occur? 
+
+- The bump in mean squared bias between 𝐾=1 and 𝐾=5 occurs due to the spatial structure of the data. At 𝐾=1, each tree's prediction is solely based on itself, leading to low bias but high variance. When 𝐾=2, the nearest neighbor introduces some bias because the yield of an adjacent tree is used in the prediction. However, as 𝐾 increases further to 5, the additional neighboring trees help balance the bias, causing it to decrease again.
+
+Based on the information in training_results_summary, which tree and which value of K gives the overall highest absolute bias? Does the sign of the bias make sense? Why do this particular tree and this particular value of K give us the largest absolute bias?
+
+- To determine which tree and which value of 𝐾 gives the highest absolute bias, we need to examine the training results summary for the tree with the largest deviation from the true value. The highest absolute bias occurs when the predicted yield is farthest from the actual yield, either positively or negatively. The sign of the bias indicates whether the model is systematically overestimating or underestimating the yield for that tree. If a particular tree has an extreme yield compared to its neighbors, then for smaller 𝐾, the prediction will be heavily influenced by that single extreme value, leading to a high bias. This pattern suggests that the tree with the highest absolute bias is likely an outlier in yield compared to its closest neighbors, and a small 𝐾 will cause the model to overfit to that single value, leading to the highest bias.
+
+
+```{r }
+n <- 6174  
+
+overall_results <- overall_results %>%
+  mutate(df = n / K)
+
+ggplot(overall_results, aes(x = df)) +
+  geom_line(aes(y = mean_sq_bias, color = "Mean Squared Bias")) +
+  geom_line(aes(y = mean_variance, color = "Mean Variance")) +
+  geom_line(aes(y = expected_test_error, color = "Expected Test Error")) +
+  labs(
+    title = "Bias-Variance Tradeoff in KNN Regression",
+    x = "Degrees of Freedom (n/K)",
+    y = "Error"
+  ) +
+  scale_color_manual(
+    name = "Metric",
+    values = c("Mean Squared Bias" = "green",
+               "Mean Variance" = "blue",
+               "Expected Test Error" = "red")
+  ) +
+  theme_minimal()
+```
+
+As the degrees of freedom increase, the mean variance decreases. This follows the expected trend, as higher values of K lead to averaging over more neighbors, which reduces variance. However, this reduction comes at the cost of increased bias.
+
+Derive a formula for the KNN mean variance. 
+
+- The KNN prediction for a given tree is the average of the yields of its K nearest neighbors:
+ ^       𝐾
+𝑌=(1/𝐾)∑  𝑌𝑖
+       𝑖=1
+where 𝑌𝑖are the yields of the K nearest neighbors.
+
+- Variance of KNN Prediction
+Assuming the yields 𝑌𝑖are independent with variance 𝜎^2, the variance of the average of K independent variables is:
+     ^
+Var(𝑌)=(𝜎^2)/𝐾
+
+- Mean Variance Across All Trees
+Since we assume each tree follows the same variance structure, the mean variance over all trees is Mean Variance=(𝜎^2)/𝐾. Thus, the KNN mean variance is inversely proportional to K, meaning that as K increases, the variance decreases.
+
+```{r }
+n <- max(training_results_summary$K) * max(training_results_summary$K)
+overall_results <- training_results_summary %>%
+  group_by(K) %>%
+  summarize(
+    mean_sq_bias = mean(bias^2),
+    mean_variance = mean(variance),
+    expected_test_error = mean_sq_bias + mean_variance
+  ) %>%
+  mutate(df = n / K, theoretical_variance = mean_variance[1] / K)
+
+ggplot(overall_results, aes(x = df)) +
+  geom_line(aes(y = mean_variance, color = "Mean Variance")) +
+  geom_line(aes(y = expected_test_error, color = "Expected Test Error")) +
+  geom_line(aes(y = mean_sq_bias, color = "Mean Squared Bias")) +
+  geom_line(aes(y = theoretical_variance), linetype = "dashed", color = "black") +
+  labs(title = "Bias-Variance Tradeoff in KNN Regression",
+       x = "Degrees of Freedom (n/K)",
+       y = "Error",
+       color = "Metric") +
+  theme_minimal()
+```
+
+The two variance curves do not match. The empirical mean variance (blue curve) remains relatively stable, while the theoretical variance (dashed black line) increases linearly as a function of degrees of freedom (n/K). This discrepancy suggests that the theoretical formula does not fully capture the actual behavior of variance in this KNN regression setting, possibly due to factors like dependence between neighboring trees or the spatial structure of the dataset.
