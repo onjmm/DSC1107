@@ -1,0 +1,620 @@
+---
+title: "SA1_DMAW"
+author: "MORILLO, JADE MARCO S."
+date: "2025-03-18"
+output: html_document
+---
+```{r setup, message=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(tidymodels)
+library(rpart)
+library(rpart.plot)
+library(glm2)
+library(caret)
+library(randomForest)
+library(stats)
+library(glmnet)
+library(dplyr)
+```
+
+## Unit 1: R for Data Mining 
+
+1. Intro to Modern Data Mining
+- Load the dataset and provide an overview of its structure (e.g., dimensions, missing values, types of variables). 
+
+```{r }
+file_path <- "C:/Users/Dindette/OneDrive/Documents/customer_churn.csv"
+customer_churn <- read_csv(file_path)
+
+glimpse(customer_churn)
+summary(customer_churn)
+sum(is.na(customer_churn))
+```
+
+The dataset contains customer demographics, services, and billing details, with CustomerID as a unique identifier and Churn as the target variable. Variables like MonthlyCharges and TotalCharges provide key financial insights, while Gender, Contract, and InternetService define customer attributes. Missing values exist and need to be addressed before modeling.  
+ 
+- Explain why data mining is important for this dataset.
+
+Data mining is crucial for this dataset as it helps uncover patterns and trends related to customer churn, enabling businesses to identify factors influencing customer retention. By analyzing service usage, contract types, and billing behavior, companies can develop targeted strategies to reduce churn, optimize pricing models, and improve customer satisfaction. 
+
+2. Data Visualization
+- Create at least three meaningful visualizations to explore relationships in the data (e.g., churn rate by tenure, service type, or monthly charges).
+
+```{r visualizations}
+ggplot(customer_churn, aes(x = Gender, fill = Churn)) +
+  geom_bar(position = "fill") +
+  labs(title = "Churn Rate by Gender", y = "Proportion", x = "Gender") +
+  scale_fill_manual(values = c("No" = "lightgreen", "Yes" = "lightpink"))
+
+ggplot(customer_churn, aes(x = Contract, fill = Churn)) +
+  geom_bar(position = "fill") +
+  labs(title = "Churn Rate by Contract Type", y = "Proportion", x = "Contract") +
+  scale_fill_manual(values = c("No" = "lightgreen", "Yes" = "lightpink"))
+
+ggplot(customer_churn, aes(x = PhoneService, fill = Churn)) +
+  geom_bar(position = "fill") +
+  labs(title = "Churn Rate by Phone Service", y = "Proportion", x = "Phone Service") +
+  scale_fill_manual(values = c("No" = "lightgreen", "Yes" = "lightpink"))
+```
+
+The first visualization shows the proportion of customers who churned across gender categories, revealing that churn rates are nearly identical between male and female customers. This suggests that gender is not a significant factor in customer retention, and efforts to reduce churn should focus on other variables.
+
+The second visualization highlights churn rates across different contract types, showing that customers on month-to-month contracts have significantly higher churn rates compared to those on one-year or two-year contracts. This indicates that contractual commitment plays a key role in retention, with longer contracts reducing the likelihood of churn. To improve retention, businesses should offer attractive incentives for long-term contracts to make it more appealing for customers to commit.
+
+The third visualization compares churn rates between customers with and without phone service, showing that both groups have similar churn proportions. This suggests that phone service alone does not strongly influence churn, and businesses should focus on other variables.
+
+3. Data Transformation
+- Handle missing values appropriately.
+
+```{r missing_values}
+customer_churn <- customer_churn %>%
+  mutate(
+    TotalCharges = ifelse(is.na(TotalCharges) | TotalCharges == "", 
+                          median(as.numeric(TotalCharges), na.rm = TRUE), 
+                          as.numeric(TotalCharges))
+  )
+
+categorical_cols <- c("Gender", "SeniorCitizen", "Partner", "Dependents", 
+                      "PhoneService", "InternetService", "Contract", "Churn")
+
+customer_churn <- customer_churn %>%
+  mutate(across(all_of(categorical_cols), ~replace_na(., as.character(mode(.)[1]))))
+
+customer_churn <- drop_na(customer_churn)
+```
+
+- Convert categorical variables into factor variables.
+
+```{r factor_variables}
+categorical_cols <- c("Gender", "SeniorCitizen", "Partner", "Dependents", 
+                      "PhoneService", "InternetService", "Contract", "Churn")
+
+customer_churn <- customer_churn %>%
+  mutate(across(all_of(categorical_cols), as.factor))
+```
+
+- Normalize or standardize numerical features where necessary.
+
+```{r normalization}
+numeric_cols <- c("Tenure", "MonthlyCharges", "TotalCharges")
+
+customer_churn <- customer_churn %>%
+  mutate(across(all_of(numeric_cols), ~scale(.)))
+
+glimpse(customer_churn)
+```
+
+Through data transformation, missing values in TotalCharges are replaced with the median to maintain data integrity, while categorical variables are filled with the most common category to prevent information loss. Additionally, dropping any remaining missing rows ensures consistency. Categorical variables are converted into factor variables, improving their usability in modeling. Finally, numerical features such as Tenure, MonthlyCharges, and TotalCharges are standardized, ensuring that all variables have comparable scales, which is essential for machine learning algorithms.
+
+4. Data Wrangling
+- Filter data to remove outliers.
+
+```{r filter_outliers}
+numeric_cols <- c("Tenure", "MonthlyCharges", "TotalCharges")
+
+remove_outliers <- function(df, cols) {
+  for (col in cols) {
+    Q1 <- quantile(df[[col]], 0.25, na.rm = TRUE)
+    Q3 <- quantile(df[[col]], 0.75, na.rm = TRUE)
+    IQR_value <- Q3 - Q1
+    lower_bound <- Q1 - 1.5 * IQR_value
+    upper_bound <- Q3 + 1.5 * IQR_value
+    df <- df %>% filter(df[[col]] >= lower_bound & df[[col]] <= upper_bound)
+  }
+  return(df)
+}
+
+customer_churn <- remove_outliers(customer_churn, numeric_cols)
+```
+
+- Create new derived variables that may help in predictive modeling.
+
+```{r new_derived_variables}
+customer_churn <- customer_churn %>%
+  mutate(
+    AvgMonthlySpend = TotalCharges / (Tenure + 1),
+    TenureCategory = case_when(
+      Tenure <= 12 ~ "Short-term",
+      Tenure > 12 & Tenure <= 36 ~ "Mid-term",
+      Tenure > 36 ~ "Long-term"
+    ),
+    HighSpender = ifelse(MonthlyCharges > median(MonthlyCharges, na.rm = TRUE), "Yes", "No")
+  )
+
+customer_churn <- customer_churn %>%
+  mutate(across(c("TenureCategory", "HighSpender"), as.factor))
+
+glimpse(customer_churn)
+```
+
+- Aggregate or summarize data if necessary.
+
+```{r aggregate}
+contract_summary <- customer_churn %>%
+  group_by(Contract) %>%
+  summarise(
+    AvgTenure = mean(Tenure, na.rm = TRUE),
+    AvgMonthlyCharges = mean(MonthlyCharges, na.rm = TRUE),
+    AvgTotalCharges = mean(TotalCharges, na.rm = TRUE),
+    ChurnRate = mean(as.numeric(Churn == "Yes"), na.rm = TRUE),
+    Count = n()
+  )
+
+tenure_summary <- customer_churn %>%
+  group_by(TenureCategory) %>%
+  summarise(
+    AvgMonthlyCharges = mean(MonthlyCharges, na.rm = TRUE),
+    AvgTotalCharges = mean(TotalCharges, na.rm = TRUE),
+    ChurnRate = mean(as.numeric(Churn == "Yes"), na.rm = TRUE),
+    Count = n()
+  )
+
+spending_summary <- customer_churn %>%
+  group_by(HighSpender) %>%
+  summarise(
+    AvgTenure = mean(Tenure, na.rm = TRUE),
+    ChurnRate = mean(as.numeric(Churn == "Yes"), na.rm = TRUE),
+    Count = n()
+  )
+
+print(contract_summary)
+print(tenure_summary)
+print(spending_summary)
+```
+
+Through data wrangling, outliers in numerical variables such as Tenure, MonthlyCharges, and TotalCharges are removed using the interquartile range method to ensure more reliable analysis and modeling. New derived variables are created to enhance predictive modeling, including AvgMonthlySpend, TenureCategory, and HighSpender. These variables provide deeper insights into customer behavior. Additionally, data is aggregated to summarize key metrics across contract types, tenure categories, and spending levels, revealing that short-term and high-spending customers exhibit higher churn rates. 
+
+The contract summary shows that customers on month-to-month contracts have the highest churn rate at 27.6%, followed by two-year's 28.1% and the lowest rate is one-year contracts at 24.7%. This indicates that customers with long-term contracts are less likely to churn. Businesses should focus on incentivizing month-to-month customers to switch to longer-term contracts through discounts or loyalty benefits to reduce churn.
+
+The tenure summary reveals that only short-term customers with tenure less than 12 months are present in the data, with a churn rate of 27.1%. This reinforces the observation that newer customers are more likely to leave, highlighting the need for improved strategies to increase retention rates.
+
+The spending summary shows that high spenders have a slightly lower average tenure and a churn rate of 26.6%, compared to 27.6% for lower spenders. While the difference is small, it suggests that pricing plays a role in churn behavior.
+
+5. Review
+- Summarize key takeaways from the exploratory data analysis process.
+
+The EDA process provided valuable insights into customer churn behavior and factors influencing retention. The dataset overview revealed key customer attributes, financial details, and missing values that needed to be addressed. Data visualization showed that gender and phone service does not significantly impact churn, but contract type strongly influences retention, with month-to-month customers exhibiting the highest churn rates. Data transformation handled missing values effectively, standardized numerical features, and converted categorical variables into usable formats for modeling. Data wrangling removed outliers, created new features like tenure categories and high spender classification, and aggregated data for further insights. The summaries indicated that short-term and high-spending customers tend to have higher churn rates, reinforcing the need for targeted retention strategies such as incentives for long-term contracts and personalized pricing plans. These findings provide a solid foundation for predictive modeling and customer retention strategies.
+
+## Unit 2: Tuning Predictive Models
+
+6. Model Complexity
+- Fit a decision tree and logistic regression model.
+```{r decisiontree_logisticsregressionmodel}
+customer_churn <- customer_churn %>%
+  select(-CustomerID)
+
+set.seed(123)
+data_split <- initial_split(customer_churn, prop = 0.8)
+train_data <- training(data_split)
+test_data <- testing(data_split)
+
+single_level_cols <- sapply(train_data, function(x) length(unique(x)) == 1)
+print("Columns with only one unique level:")
+print(names(single_level_cols[single_level_cols]))
+
+train_data <- train_data %>%
+  select(-names(single_level_cols[single_level_cols]))
+test_data <- test_data %>%
+  select(-names(single_level_cols[single_level_cols]))
+
+tree_model <- rpart(
+  Churn ~ ., 
+  data = train_data,
+  method = "class",
+  control = rpart.control(cp = 0.001),
+  parms = list(prior = c(0.7, 0.3))
+)
+
+rpart.plot(tree_model, main = "Decision Tree for Customer Churn")
+
+tree_predictions <- predict(tree_model, test_data, type = "class")
+
+confusion_matrix_tree <- table(Predicted = tree_predictions, Actual = test_data$Churn)
+print(confusion_matrix_tree)
+
+accuracy_tree <- sum(diag(confusion_matrix_tree)) / sum(confusion_matrix_tree)
+print(paste("Decision Tree Accuracy:", accuracy_tree))
+
+logistic_model <- glm(
+  Churn ~ .,
+  data = train_data,
+  family = binomial()
+)
+
+summary(logistic_model)
+
+logistic_predictions <- predict(logistic_model, test_data, type = "response")
+logistic_predictions <- ifelse(logistic_predictions > 0.5, "Yes", "No")
+
+confusion_matrix_logistic <- table(Predicted = logistic_predictions, Actual = test_data$Churn)
+print(confusion_matrix_logistic)
+
+accuracy_logistic <- sum(diag(confusion_matrix_logistic)) / sum(confusion_matrix_logistic)
+print(paste("Logistic Regression Accuracy:", accuracy_logistic))
+```
+
+The decision tree visualization provides insights into the factors influencing customer churn. The tree splits on variables such as ApplicationSpeed, Contract, and MonthlyChange, indicating that these features are significant predictors of churn. For instance, customers with a Contract type of "Month to month" are more likely to churn compared to those with longer-term contracts. The tree also highlights the importance of ApplicationSpeed and MonthlyChange, suggesting that service performance and billing changes play a role in customer retention. This visualization helps identify areas where businesses can focus their efforts to reduce churn.
+
+The decision tree model achieved an accuracy of approximately 73.06% on the test set. The confusion matrix shows that the model correctly predicted 1448 non-churn cases but only 3 churn cases. This indicates that the model is better at identifying customers who are unlikely to churn but struggles with predicting churn cases.
+
+The logistic regression model's coefficients provide insights into the relationship between each predictor and the likelihood of churn. Notably, the ContractOne_year variable has a significant negative coefficient, indicating that customers with one-year contracts are less likely to churn compared to those with month-to-month contracts. Other variables, such as Gender, SeniorCitizen, and MonthlyCharges, have smaller coefficients and are not statistically significant, suggesting they have a weaker impact on churn. The model's AIC value of 9319.9 indicates a reasonable fit, but the lack of significance for many variables suggests that the model could benefit from feature selection to improve its predictive power.
+
+The logistic regression model achieved an accuracy of approximately 73.51% on the test set, slightly higher than the decision tree model. The confusion matrix shows that the model correctly predicted 1460 non-churn cases but only 526 churn cases. Similar to the decision tree, the logistic regression model struggles with predicting churn cases, indicating a potential issue with class imbalance.
+
+- Compare their complexities and explain trade-offs.
+
+The decision tree model is more complex and flexible, capable of capturing non-linear relationships and interactions, making it highly interpretable and providing better visualization of decision paths, but it is prone to overfitting without proper tuning. In contrast, logistic regression is simpler, assuming a linear relationship between predictors and the target, making it less prone to overfitting. Both models achieved similar accuracy (~73%), but struggled with predicting churn cases, indicating a need to address class imbalance. The trade-off lies in choosing between the decision tree's interpretability and flexibility, which requires careful tuning, and logistic regression's simplicity and robustness, which may need feature engineering for better performance. However, for this dataset, neither model excels at predicting churn.
+
+7. Bias-Variance Trade-Off
+- Explain the concept of bias-variance trade-off in the context of the models trained.
+
+The decision tree model exhibits low bias because it can capture complex, non-linear relationships in the data, making it highly flexible. However, this flexibility comes at the cost of high variance, meaning the model is sensitive to small changes in the training data and may overfit. While, the logistic regression model has higher bias because it assumes a linear relationship between predictors and the log-odds of the target variable. This simplicity makes it less flexible in capturing complex patterns, leading to potential underfitting. However, it benefits from lower variance, as it is less sensitive to small changes in the training data, resulting in better generalization.
+
+- Discuss how model complexity affects performance.
+
+The decision tree's high complexity allows it to model intricate patterns, leading to high training accuracy. However, this complexity also increases the risk of overfitting, as the model may learn noise or specific details from the training data. To improve performance, the model's complexity can be reduced through pruning or limiting the tree's depth, but this may increase bias and cause the model to underfit. As for the logistic regression model, its low complexity makes it less prone to overfitting, as it assumes a linear relationship between predictors and the target variable. However, this simplicity limits its ability to capture non-linear relationships, leading to underfitting and lower overall performance. Increasing complexity through feature engineering or interaction terms can reduce bias but risks increasing variance.
+
+8. Cross-Validation
+- Use k-fold cross-validation (k=10) to evaluate model performance.
+```{r }
+train_data$Churn <- as.factor(train_data$Churn)
+train_data <- as.data.frame(train_data)
+
+train_control <- trainControl(
+  method = "cv",
+  number = 10, 
+  savePredictions = TRUE,
+  classProbs = TRUE, 
+  summaryFunction = twoClassSummary 
+)
+
+set.seed(123)
+tree_model_cv <- train(
+  Churn ~ .,
+  data = train_data,
+  method = "rpart", 
+  trControl = train_control,
+  metric = "ROC"
+)
+
+set.seed(123)
+logistic_model_cv <- train(
+  Churn ~ .,
+  data = train_data,
+  method = "glm",
+  family = binomial(),
+  trControl = train_control,
+  metric = "ROC"
+)
+
+print(tree_model_cv)
+print(logistic_model_cv)
+```
+
+The decision tree model, trained using 10-fold cross-validation, shows relatively low performance in terms of ROC-AUC at 0.497, sensitivity at 0.996, and specificity at 0.004. The high sensitivity indicates that the model is excellent at identifying non-churn cases, but the extremely low specificity suggests it struggles to correctly identify churn cases. This imbalance is likely due to the model being biased toward the majority class, which is common in imbalanced datasets. The final model uses a complexity parameter of 0.0009237875, which was chosen to maximize ROC-AUC. However, the low ROC-AUC and specificity indicate that the model is not effectively distinguishing between the two classes. 
+
+Then, the logistic regression model, also evaluated using 10-fold cross-validation, achieves an ROC-AUC of 0.506, sensitivity of 1, and specificity of 0. Similar to the decision tree, the model performs well in identifying non-churn cases but fails to correctly classify churn cases. The ROC-AUC of 0.506 is only slightly better than random guessing, indicating that the model is not effectively capturing the underlying patterns in the data.
+
+- Report and interpret accuracy, precision, recall, and F1-score.
+
+```{r report}
+calculate_metrics <- function(predictions, actual) {
+  predictions <- factor(predictions, levels = c("Yes", "No"))
+  actual <- factor(actual, levels = c("Yes", "No"))
+  
+  cm <- confusionMatrix(predictions, actual)
+  
+  accuracy <- cm$overall["Accuracy"]
+  precision <- cm$byClass["Pos Pred Value"]
+  recall <- cm$byClass["Sensitivity"]
+  f1_score <- cm$byClass["F1"]
+  
+  return(list(
+    Accuracy = accuracy,
+    Precision = precision,
+    Recall = recall,
+    F1_Score = f1_score
+  ))
+}
+
+tree_predictions <- tree_model_cv$pred$pred
+logistic_predictions <- logistic_model_cv$pred$pred
+
+tree_actual <- tree_model_cv$pred$obs
+logistic_actual <- logistic_model_cv$pred$obs
+
+tree_actual <- factor(tree_actual, levels = c("Yes", "No"))
+logistic_actual <- factor(logistic_actual, levels = c("Yes", "No"))
+
+tree_metrics <- calculate_metrics(tree_predictions, tree_actual)
+print(tree_metrics)
+
+logistic_metrics <- calculate_metrics(logistic_predictions, logistic_actual)
+print(logistic_metrics)
+```
+
+The decision tree model achieves an accuracy of 71.66%, which is relatively high, but this is primarily due to its ability to correctly classify the majority class. The precision of 25.43% indicates that when the model predicts a churn case, it is correct only about a quarter of the time. The recall of 2.05% is extremely low, meaning the model identifies only a small fraction of actual churn cases. The F1-score of 0.038 reflects the poor balance between precision and recall, highlighting the model's inability to effectively predict churn cases. This performance suggests that the decision tree is heavily biased toward the majority class and struggles with class imbalance.
+
+While, the logistic regression model achieves an accuracy of 72.74%, slightly higher than the decision tree, but this is again driven by its ability to correctly classify the majority class. The precision is NaN (undefined), which occurs because the model predicts no churn cases (Yes), resulting in zero true positives and false positives. The recall of 0% confirms that the model fails to identify any actual churn cases. The F1-score is NA due to the undefined precision and zero recall. This performance indicates that the logistic regression model is completely biased toward the majority class and provides no value in predicting churn cases.
+
+9. Classification
+- Train a Random Forest classifier to predict customer churn.
+
+```{r random_forest}
+train_data$Churn <- factor(train_data$Churn, levels = c("No", "Yes"))
+
+set.seed(123)  
+rf_model <- randomForest(
+  Churn ~ .,  
+  data = train_data,
+  ntree = 100,  
+  mtry = sqrt(ncol(train_data)) - 1,  
+  importance = TRUE,  
+  proximity = TRUE  
+)
+
+print(rf_model)
+
+test_data$Churn <- factor(test_data$Churn, levels = c("No", "Yes"))
+rf_predictions <- predict(rf_model, test_data)
+
+confusion_matrix <- confusionMatrix(rf_predictions, test_data$Churn)
+print(confusion_matrix)
+
+importance(rf_model)
+varImpPlot(rf_model)
+```
+
+The Random Forest model, trained with 100 trees and 3 variables tried at each split, achieves an out-of-bag error rate of 28.66%. The confusion matrix for the OOB samples reveals that the model performs well in predicting non-churn cases with a class error of 3.36%, but it struggles significantly with churn cases, with a class error of 96.17%. This indicates that the model is heavily biased toward the majority class and fails to effectively identify churn cases. The high OOB error rate and poor performance on the minority class suggest that the model is not well-suited for churn prediction in its current form, likely due to class imbalance.
+
+On the test set, the model achieves an accuracy of 71.4%, which is relatively high but driven by its ability to correctly classify non-churn cases. The sensitivity is 96.51%, indicating excellent performance in identifying non-churn cases. However, the specificity is only 1.71%, meaning the model almost entirely fails to identify churn cases. The precision for No is 73.16%, while the precision for Yes is 15.00%, highlighting the model's poor performance in predicting churn.
+
+The variable importance analysis identifies the most influential features in the model. TotalCharges, MonthlyCharges, AvgMonthlySpend, and Tenure are the top contributors based on both MeanDecreaseAccuracy and MeanDecreaseGini. These financial and tenure-related features are critical for predicting churn, while features like Gender, SeniorCitizen, and PhoneService have minimal impact. 
+
+- Tune hyperparameters using grid search.
+
+```{r hyperparameters}
+train_data$Churn <- factor(train_data$Churn, levels = c("No", "Yes"))
+
+tune_grid <- expand.grid(
+  mtry = c(2, 3, 4, 5)  
+)
+
+train_control <- trainControl(
+  method = "cv",  
+  number = 10,    
+  search = "grid",  
+  classProbs = TRUE,  
+  summaryFunction = twoClassSummary  
+)
+
+# Train the model with grid search
+set.seed(123)
+rf_tuned <- train(
+  Churn ~ .,  
+  data = train_data,
+  method = "rf",  
+  trControl = train_control,
+  tuneGrid = tune_grid,
+  metric = "ROC",  
+  ntree = 100  
+)
+
+print(rf_tuned)
+
+print(paste("Best mtry:", rf_tuned$bestTune$mtry))
+
+test_data$Churn <- factor(test_data$Churn, levels = c("No", "Yes"))
+tuned_predictions <- predict(rf_tuned, test_data)
+
+confusion_matrix <- confusionMatrix(tuned_predictions, test_data$Churn)
+print(confusion_matrix)
+```
+
+The Random Forest model was tuned using grid search with mtry values of 2, 3, 4, 5 and a fixed ntree of 100. The best value for mtry was found to be 2, selected based on the highest ROC-AUC with 0.486. However, the ROC-AUC values across all mtry values are very close to 0.5, which is the performance of a random classifier. This indicates that the model is not effectively distinguishing between the two classes. The sensitivity is 1.000, meaning the model correctly identifies all non-churn cases, but the specificity is 0.000, indicating that the model fails to identify any churn cases. 
+
+On the test set, the tuned model achieves an accuracy of 73.51%, which is identical to the no-information rate. The sensitivity is 1.000, confirming that the model correctly identifies all non-churn cases, but the specificity is 0.000, meaning it fails to identify any churn cases. The positive predictive value is 73.51%, while the negative predictive value is NaN because the model predicts no churn cases. The confusion matrix shows that the model predicts all instances as No, resulting in 526 false negatives and 0 true positives. This performance highlights the model's inability to handle class imbalance effectively.
+
+- Report final model performance.
+
+The final tuned Random Forest model's performance reveals significant limitations, primarily due to class imbalance in the dataset. The model achieves an accuracy of 73.51%, which is identical to the no-information rate. This indicates that the model is not performing better than a naive classifier. The confusion matrix shows that the model predicts all instances as No, resulting in 1460 true negatives and 526 false negatives. There are 0 true positives and 0 false positives, meaning the model fails to identify any churn cases. This behavior is a clear sign of the model's bias toward the majority class, rendering it ineffective for churn prediction.
+
+The model's sensitivity is 100.00%, meaning it correctly identifies all non-churn cases. However, this is a misleading metric because the model achieves this by predicting all instances as No. The specificity is 0.00%, indicating that the model fails to detect any churn cases. The precision for No is 73.51%, which is equivalent to the prevalence of the majority class, further confirming that the model has no real predictive power. The precision for Yes is NaN because the model predicts no churn cases, and the F1-score is also NaN due to the absence of true positives. The Kappa statistic is 0, indicating no agreement between the model's predictions and the actual values beyond what would be expected by chance. The best ROC-AUC achieved during tuning was 0.486, which is very close to 0.5 (random guessing), confirming that the model is not effectively distinguishing between the two classes.
+
+The primary issue is class imbalance, where the majority class dominates the minority class. This imbalance causes the model to be heavily biased toward the majority class, leading to poor performance on the minority class. The grid search for hyperparameter tuning did not significantly improve the model's performance, as the ROC-AUC values remained close to 0.5. Additionally, the use of accuracy and ROC-AUC as evaluation metrics is inappropriate for imbalanced datasets. Metrics like precision, recall, and F1-score are more suitable but cannot be calculated due to the model's failure to predict any churn cases.
+
+## Unit 3: Regression-Based Methods
+
+10. Logistic Regression
+- Fit a logistic regression model using Churn as the dependent variable and Tenure, MonthlyCharges, and TotalCharges as independent variables.
+
+```{r regression-based}
+train_data$Churn <- factor(train_data$Churn, levels = c("No", "Yes"))
+test_data$Churn <- factor(test_data$Churn, levels = c("No", "Yes"))
+
+logistic_model <- glm(
+  Churn ~ Tenure + MonthlyCharges + TotalCharges, 
+  data = train_data,
+  family = binomial()  
+)
+
+summary(logistic_model)
+
+logistic_predictions <- predict(logistic_model, test_data, type = "response")
+logistic_predictions <- ifelse(logistic_predictions > 0.5, "Yes", "No")
+logistic_predictions <- factor(logistic_predictions, levels = c("No", "Yes"))
+
+confusion_matrix <- confusionMatrix(logistic_predictions, test_data$Churn)
+print(confusion_matrix)
+```
+
+- Interpret the coefficients and assess model significance using p-values.
+
+The logistic regression model was fitted using Tenure, MonthlyCharges, and TotalCharges as independent variables to predict Churn. The intercept of -0.981933 represents the baseline log-odds of churn when all predictors are zero. Tenure at 0.043777, MonthlyCharges at -0.006865, and TotalCharges at -0.038426 indicate the direction and magnitude of their impact on the log-odds of churn. A positive coefficient for Tenure suggests that longer tenure increases the likelihood of churn, while negative coefficients for MonthlyCharges and TotalCharges suggest that higher charges reduce the likelihood of churn. However, the p-values for all predictors with Tenure at 0.506, MonthlyCharges at 0.891, and TotalCharges at 0.627 are much greater than 0.05, indicating that none of these variables have a statistically significant relationship with Churn in this model. 
+
+The null deviance of 9305.3 represents the deviance of a model with no predictors, while the residual deviance of 9303.5 represents the deviance of the fitted model. The small difference between these values indicates that adding Tenure, MonthlyCharges, and TotalCharges to the model does not significantly improve its fit. The AIC value of 9311.5 further supports this conclusion, as a lower AIC would indicate a better-fitting model. The confusion matrix for the test set reveals that the model achieves an accuracy of 73.51%, which is identical to the no-information rate. The model correctly identifies all non-churn cases but it fails to identify any churn cases. The precision for No is 73.51%, while the precision for Yes is NaN because the model predicts no churn cases. The F1-score is also NaN, as there are no true positives for churn cases.
+
+11. Regression in High Dimensions
+- Discuss the challenges of high-dimensional regression and potential solutions.
+
+High-dimensional regression, where the number of predictors far exceeds the number of observations, presents several significant challenges. One of the primary issues is the curse of dimensionality, where the volume of the feature space grows exponentially with the number of predictors, making the data sparse and difficult to analyze. Additionally, high-dimensional datasets frequently suffer from multicollinearity, where predictors are highly correlated, destabilizing regression models and making it difficult to interpret the coefficients. The complexity of fitting models to high-dimensional data can also be restrictive, especially for algorithms that do not scale well with the number of predictors. Finally, interpretability becomes a major challenge, as models with many predictors are often difficult to understand, making it hard to discern the contribution of each predictor to the outcome.
+
+Multiple approaches can be used to solve these challenges. Feature selection methods help reduce the number of predictors by identifying the most relevant features. Regularization techniques feature selection and coefficient shrinkage to prevent overfitting and improve model stability. Dimensionality reduction methods transform the data into a lower-dimensional space, making it easier to analyze and visualize. Ensemble methods combine multiple models to reduce overfitting and enhance generalization. Cross-validation techniques help assess model performance and ensure that the model generalizes well to unseen data. Moreover, sparse models and algorithms designed for high-dimensional data focus on identifying a small subset of relevant predictors. Finally, incorporating domain knowledge into the modeling process can guide feature selection and engineering, ensuring that the most relevant predictors are included and improving the interpretability of the model. 
+
+- Apply Principal Component Analysis (PCA) on numerical features (Tenure, MonthlyCharges, TotalCharges) to reduce dimensionality.
+
+```{r PCA}
+numerical_features <- train_data[, c("Tenure", "MonthlyCharges", "TotalCharges")]
+numerical_features_scaled <- scale(numerical_features)
+pca_result <- prcomp(numerical_features_scaled, center = TRUE, scale. = TRUE)
+
+summary(pca_result)
+
+pca_scores <- pca_result$x
+train_data_pca <- cbind(train_data, pca_scores)
+
+head(train_data_pca)
+
+plot(pca_result, type = "l", main = "Variance Explained by Principal Components")
+```
+
+The PCA results indicate that the first two principal components capture the majority of the variance in the dataset. PC1 has a standard deviation of 1.3789 and explains 63.38% of the variance, while PC2 has a standard deviation of 1.0221 and explains 34.82%. Together, they account for 98.2% of the cumulative variance, making them the most significant components. PC3, with a standard deviation of 0.23208, contributes only 1.795% to the variance, suggesting it has minimal impact. This highlights that the dataset can be effectively reduced to two dimensions without losing much information, which simplifies further analysis.
+
+The transformed dataset includes the original features alongside the principal components. The PCA transformation has effectively reduced the dimensionality of the dataset, focusing on the most informative components. For instance, customer attributes like tenure, monthly charges, and internet service type are now represented in a lower-dimensional space. This transformation is particularly useful for tasks as it reduces noise and computational complexity while retaining the essential structure of the data.
+
+The plot of variance explained by each principal component visually reinforces the summary statistics. It shows that PC1 and PC2 are the most significant, capturing the majority of the variance, while PC3 contributes very little. This visualization helps in deciding how many components to retain for further analysis. By focusing on PC1 and PC2, you can simplify the dataset while preserving most of the underlying patterns, making it easier to interpret and analyze.
+
+12. Ridge Regression
+- Implement Ridge Regression using Churn as the target variable and Tenure, MonthlyCharges, TotalCharges, and additional customer demographic features as predictors.
+```{r ridge_regression}
+features <- c("Tenure", "MonthlyCharges", "TotalCharges", "Gender", "SeniorCitizen", "Partner", "Dependents")
+X <- customer_churn[, features]
+y <- customer_churn$Churn
+
+X <- X %>%
+  mutate(across(where(is.character), as.factor)) %>%
+  model.matrix(~ . - 1, data = .)
+
+X[is.na(X)] <- colMeans(X, na.rm = TRUE)
+
+set.seed(42)
+train_index <- createDataPartition(y, p = 0.8, list = FALSE)
+X_train <- X[train_index, ]
+X_test <- X[-train_index, ]
+y_train <- y[train_index]
+y_test <- y[-train_index]
+
+preprocess_params <- preProcess(X_train, method = c("center", "scale"))
+X_train_scaled <- predict(preprocess_params, X_train)
+X_test_scaled <- predict(preprocess_params, X_test)
+
+ridge_model <- glmnet(X_train_scaled, y_train, alpha = 0, family = "binomial")
+cv_ridge <- cv.glmnet(X_train_scaled, y_train, alpha = 0, family = "binomial")
+best_lambda <- cv_ridge$lambda.min
+ridge_model <- glmnet(X_train_scaled, y_train, alpha = 0, lambda = best_lambda, family = "binomial")
+
+y_pred <- predict(ridge_model, newx = X_test_scaled, type = "response")
+y_pred_class <- ifelse(y_pred > 0.5, 1, 0)
+
+confusion_matrix <- table(Predicted = y_pred_class, Actual = y_test)
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+print(confusion_matrix)
+print(paste("Accuracy:", accuracy))
+
+plot(cv_ridge, main = "Cross-Validation Results for Ridge Regression")
+plot(ridge_model, xvar = "lambda", label = TRUE, main = "Coefficient Paths for Ridge Regression")
+```
+
+The confusion matrix reveals that the Ridge Regression model achieved an accuracy of 72.9%, primarily due to its ability to correctly predict non-churn cases. However, the model failed to predict any churn cases, indicating a significant bias toward the majority class. This highlights a critical limitation of the model, as it is unable to identify customers at risk of churning.
+
+The cross-validation plot shows the mean squared error as a function of the regularization parameter. The optimal lambda value, indicated by the vertical dashed line, was selected to minimize the cross-validation error, ensuring the model generalizes well to unseen data. This balance between bias and variance helps prevent overfitting while maintaining model performance. The plot confirms that the model is appropriately regularized for the given dataset.
+
+The coefficient paths plot illustrates how the coefficients of the predictors shrink as the regularization parameter increases. At lower lambda values, the coefficients are less constrained, allowing the model to fit the training data more closely. As lambda increases, the coefficients are penalized more heavily, leading to a simpler model. The plot demonstrates the trade-off between model complexity and performance, with the optimal lambda value striking a balance between the two.
+
+- Identify the optimal lambda using cross-validation.
+
+```{r optimal_lambda}
+cv_ridge <- cv.glmnet(X_train_scaled, y_train, alpha = 0, family = "binomial")
+
+best_lambda <- cv_ridge$lambda.min
+print(paste("Optimal Lambda:", best_lambda))
+```
+
+An optimal lambda value of 4.863 in Ridge Regression indicates strong regularization, meaning the model is heavily penalizing large coefficients to prevent overfitting and handle multicollinearity or high-dimensionality in the dataset. This results in a simpler model with reduced variance but potentially higher bias, as many coefficients are shrunk toward zero, downplaying less important predictors. While this helps the model generalize better to unseen data, it may also lead to underfitting if the regularization is too aggressive.
+
+13. Lasso Regression
+- Implement Lasso Regression with the same feature set as Ridge Regression.
+
+```{r lasso_regression}
+features <- c("Tenure", "MonthlyCharges", "TotalCharges", "Gender", "SeniorCitizen", "Partner", "Dependents")
+X <- customer_churn[, features]
+y <- customer_churn$Churn
+
+X <- X %>%
+  mutate(across(where(is.character), as.factor)) %>%
+  model.matrix(~ . - 1, data = .)
+
+X[is.na(X)] <- colMeans(X, na.rm = TRUE)
+
+set.seed(42)
+train_index <- createDataPartition(y, p = 0.8, list = FALSE)
+X_train <- X[train_index, ]
+X_test <- X[-train_index, ]
+y_train <- y[train_index]
+y_test <- y[-train_index]
+
+preprocess_params <- preProcess(X_train, method = c("center", "scale"))
+X_train_scaled <- predict(preprocess_params, X_train)
+X_test_scaled <- predict(preprocess_params, X_test)
+
+cv_lasso <- cv.glmnet(X_train_scaled, y_train, alpha = 1, family = "binomial")
+
+best_lambda <- cv_lasso$lambda.min
+print(paste("Optimal Lambda for Lasso:", best_lambda))
+
+lasso_model <- glmnet(X_train_scaled, y_train, alpha = 1, lambda = best_lambda, family = "binomial")
+
+y_pred <- predict(lasso_model, newx = X_test_scaled, type = "response")
+y_pred_class <- ifelse(y_pred > 0.5, 1, 0)
+
+confusion_matrix <- table(Predicted = y_pred_class, Actual = y_test)
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+print(confusion_matrix)
+print(paste("Accuracy:", accuracy))
+
+plot(cv_lasso, main = "Cross-Validation Results for Lasso Regression")
+plot(lasso_model, xvar = "lambda", label = TRUE, main = "Coefficient Paths for Lasso Regression")
+```
+
+The optimal lambda value for Lasso Regression is 0.00706, which is relatively small, indicating mild regularization. This suggests that the dataset may not have severe multicollinearity or that many features contribute to the prediction. A small lambda allows the model to retain more predictors without overly shrinking their coefficients, balancing bias and variance. However, the model's performance on the test set reveals limitations, particularly in predicting churn cases.
+
+The confusion matrix reveals that the model attained an accuracy of 72.9%, largely driven by its correct predictions of non-churn cases. However, it failed to identify any churn cases, highlighting a substantial bias toward the majority class. As a result, the seemingly high accuracy is misleading, as the model is ineffective at detecting customers likely to churn.
+
+The cross-validation plot depicts the mean squared error against the log of lambda. The optimal lambda value is selected to minimize the cross-validation error, promoting better generalization to unseen data. The plot demonstrates that the model is properly regularized, effectively balancing bias and variance to avoid overfitting while preserving performance.
+
+The coefficient paths plot illustrates how the predictor coefficients evolve as lambda changes. As lambda increases, certain coefficients shrink to zero, highlighting Lasso Regression's ability to perform feature selection by excluding less relevant predictors. This leads to a simpler, more interpretable model. The plot also reveals that the optimal lambda value strikes a balance between accurately fitting the data and preventing overfitting, while preserving the most impactful features.
+
+- Discuss feature selection benefits and interpret the coefficients.
+
+Feature selection in Lasso Regression offers improved model interpretability, reduced overfitting, faster training and inference, and enhanced performance. By shrinking some coefficients to exactly zero, Lasso excludes less important predictors, resulting in a simpler model that is easier to understand and deploy. This process also helps identify the most relevant features, providing valuable insights into the factors driving the target variable. For example, coefficients indicate the strength and direction of the relationship between predictors and churn: positive coefficients such as MonthlyCharges suggest that higher values increase churn likelihood, while negative coefficients such as Tenure imply that higher values reduce churn likelihood. Predictors with coefficients shrunk to zero are considered unimportant and excluded, simplifying the model without sacrificing performance. Overall, Lasso's feature selection and coefficient interpretation provide a powerful tool for building interpretable, efficient, and effective predictive models.
