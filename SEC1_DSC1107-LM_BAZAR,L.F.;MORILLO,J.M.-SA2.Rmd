@@ -1,0 +1,360 @@
+---
+title: "SEC1_DSC1107-LM_BAZAR,L.F.;MORILLO,J.M.-SA2"
+author: "MORILLO, JADE MARCO S."
+date: "2025-05-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+set.seed(123)
+
+knitr::opts_chunk$set(echo = TRUE)
+library(readr)
+library(ranger)
+library(dplyr)
+library(caret)
+library(ggplot2)
+library(fastDummies)
+library(corrplot)
+library(glmnet)
+library(rpart)
+library(xgboost)
+library(pROC)
+library(rpart.plot)
+```
+
+```{r datasets}
+df_train <- read.csv("C:/Users/Dindette/Downloads/churn-bigml-80.csv")
+df_test <- read.csv("C:/Users/Dindette/Downloads/churn-bigml-20.csv")
+
+cat("Missing values in training set:", sum(is.na(df_train)), "\n")
+cat("Missing values in test set:", sum(is.na(df_test)), "\n")
+
+glimpse(df_train)
+glimpse(df_test)
+```
+
+1. Dataset Familiarization & Preparation
+
+```{r cleaning}
+# Drop non-predictive identifiers
+df_train <- df_train %>%
+  select(-State, -Area.code)
+
+df_test <- df_test %>%
+  select(-State , -Area.code)
+
+# Convert Churn to binary
+df_train$Churn <- ifelse(df_train$Churn == "True", 1, 0)
+df_test$Churn <- ifelse(df_test$Churn == "True", 1, 0)
+
+# One-hot encoding for categorical variables
+df_train_encoded <- dummy_cols(df_train, 
+                              select_columns = c("International.plan", "Voice.mail.plan"),
+                              remove_first_dummy = TRUE,
+                              remove_selected_columns = TRUE)
+
+df_test_encoded <- dummy_cols(df_test,
+                             select_columns = c("International.plan", "Voice.mail.plan"),
+                             remove_first_dummy = TRUE,
+                             remove_selected_columns = TRUE)
+```
+
+2. Exploratory Data Analysis
+
+```{r summarry}
+summary(df_train %>% select_if(is.numeric))
+
+cat("Churn rate in training set:", mean(df_train$Churn) * 100, "%\n")
+```
+
+Churn Rate Analysis
+
+```{r churn}
+churn_rate <- df_train %>%
+  count(Churn) %>%
+  mutate(Percentage = n / sum(n) * 100)
+churn_rate
+```
+
+Feature Distributions
+
+```{r churn-distib}
+ggplot(df_train, aes(x = Total.day.minutes, fill = as.factor(Churn))) + 
+  geom_histogram(bins = 30, position = "identity", alpha = 0.6) +
+  labs(title = "Distribution of Total Day Minutes by Churn", 
+       x = "Total Day Minutes", 
+       fill = "Churn")
+```
+Service Usage
+
+```{r service-usage}
+ggplot(df_train, aes(x = as.factor(Churn), y = Customer.service.calls)) +
+  geom_boxplot() +
+  labs(title = "Customer Service Calls by Churn Status", x = "Churn", y = "Calls")
+```
+
+Correlation Analysis
+
+```{r correlation}
+numeric_data <- select_if(df_train, is.numeric)
+cor_matrix <- cor(numeric_data, use = "complete.obs")
+corrplot(cor_matrix, method = "color", type = "upper", tl.cex = 0.8)
+```
+
+Class Imbalance
+
+```{r imbalance}
+ggplot(df_train, aes(x = as.factor(Churn))) +
+  geom_bar(fill = c("#2c7fb8", "#f03b20")) +
+  labs(title = "Churn Class Distribution", 
+       x = "Churn", 
+       y = "Count") +
+  theme_minimal()
+```
+
+3. Modeling and Comparison
+Prepare Data for Modeling
+
+```{r preparation}
+x_train <- df_train_encoded %>% select(-Churn)
+y_train <- factor(df_train_encoded$Churn, levels = c(0, 1), labels = c("No", "Yes"))
+x_test <- df_test_encoded %>% select(-Churn)
+y_test <- factor(df_test_encoded$Churn, levels = c(0, 1), labels = c("No", "Yes"))
+
+ctrl <- trainControl(
+  method = "cv",
+  number = 10,
+  classProbs = TRUE, 
+  summaryFunction = twoClassSummary,  
+  savePredictions = TRUE
+)
+```
+
+Regression-Based Models
+
+Logistic Regression
+
+```{r logistics-regression}
+log_model <- train(
+  x = x_train,
+  y = y_train,
+  method = "glm",
+  family = "binomial",
+  trControl = ctrl,
+  metric = "ROC" 
+)
+
+log_probs <- predict(log_model, x_test, type = "prob")[, "Yes"]
+log_preds <- ifelse(log_probs > 0.5, "Yes", "No")
+
+confusionMatrix(factor(log_preds), y_test)
+roc_obj_log <- roc(as.numeric(y_test == "Yes"), log_probs)
+auc(roc_obj_log)
+```
+
+Lasso Regression
+
+```{r lasso-regression}
+lambda_grid <- 10^seq(-4, 0, length = 100)
+
+lasso_model <- train(
+  x = x_train,
+  y = y_train,
+  method = "glmnet",
+  family = "binomial",
+  trControl = ctrl,
+  tuneGrid = expand.grid(alpha = 1, lambda = lambda_grid),
+  metric = "ROC"
+)
+
+ggplot(lasso_model) +
+  labs(title = "Lasso Regression Tuning Results") +
+  theme_minimal()
+
+lasso_model$bestTune
+
+lasso_probs <- predict(lasso_model, x_test, type = "prob")[, "Yes"]
+lasso_preds <- ifelse(lasso_probs > 0.5, "Yes", "No")
+
+confusionMatrix(factor(lasso_preds), y_test)
+roc_obj_lasso <- roc(as.numeric(y_test == "Yes"), lasso_probs)
+auc(roc_obj_lasso)
+
+varImp(lasso_model)
+```
+
+Tree-based Models
+
+Decision Tree
+
+```{r decision-tree}
+tree_model <- train(  
+  x = x_train,  
+  y = y_train,  
+  method = "rpart",  
+  trControl = ctrl,  
+  tuneLength = 10, 
+  metric = "ROC"  
+)  
+
+ggplot(tree_model) +  
+  labs(title = "Decision Tree Tuning (Complexity Parameter vs. ROC)") +  
+  theme_minimal()  
+
+tree_model$bestTune  
+
+tree_probs <- predict(tree_model, x_test, type = "prob")[, "Yes"]  
+tree_preds <- ifelse(tree_probs > 0.5, "Yes", "No")  
+ 
+confusionMatrix(factor(tree_preds), y_test)  
+roc_obj_tree <- roc(as.numeric(y_test == "Yes"), tree_probs)  
+auc(roc_obj_tree)  
+
+rpart.plot(tree_model$finalModel, box.palette = "Blues", shadow.col = "gray", nn = TRUE)  
+```
+
+Random Forest
+
+```{r random-forest}
+rf_grid <- expand.grid(
+  mtry = c(2, 4, 6, 8),  
+  splitrule = "gini",
+  min.node.size = c(1, 5, 10)
+)
+
+rf_model <- train(
+  x = x_train,
+  y = y_train,
+  method = "ranger",
+  trControl = ctrl,
+  tuneGrid = rf_grid,
+  importance = "permutation", 
+  metric = "ROC"
+)
+
+ggplot(rf_model) +
+  labs(title = "Random Forest Tuning Results") +
+  theme_minimal()
+
+rf_model$bestTune
+
+rf_probs <- predict(rf_model, x_test, type = "prob")[, "Yes"]
+rf_preds <- ifelse(rf_probs > 0.5, "Yes", "No")
+
+confusionMatrix(factor(rf_preds), y_test)
+roc_obj_rf <- roc(as.numeric(y_test == "Yes"), rf_probs)
+auc(roc_obj_rf)
+
+varImp(rf_model) %>% 
+  ggplot(aes(x = reorder(rownames(.), Overall), y = Overall)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Random Forest - Variable Importance",
+       x = "Features",
+       y = "Importance Score") +
+  theme_minimal()
+```
+
+Gradient Boosting
+
+```{r gradient-boosting}
+xgb_train <- xgb.DMatrix(
+  data = as.matrix(x_train),
+  label = as.numeric(y_train == "Yes")
+)
+
+xgb_test <- xgb.DMatrix(
+  data = as.matrix(x_test),
+  label = as.numeric(y_test == "Yes")
+)
+
+xgb_params <- list(
+  objective = "binary:logistic",
+  eval_metric = "auc",
+  max_depth = 6,
+  eta = 0.1,
+  gamma = 0,
+  subsample = 0.8,
+  colsample_bytree = 0.8
+)
+
+xgb_model <- xgb.train(
+  params = xgb_params,
+  data = xgb_train,
+  nrounds = 200,
+  watchlist = list(train = xgb_train, test = xgb_test),
+  early_stopping_rounds = 20,
+  print_every_n = 10
+)
+
+importance_matrix <- xgb.importance(
+  feature_names = colnames(x_train),
+  model = xgb_model
+)
+
+xgb.plot.importance(
+  importance_matrix,
+  top_n = 15,
+  main = "XGBoost - Top 15 Important Features"
+)
+
+xgb_probs <- predict(xgb_model, as.matrix(x_test))
+xgb_preds <- ifelse(xgb_probs > 0.5, "Yes", "No")
+
+confusionMatrix(
+  factor(xgb_preds, levels = c("No", "Yes")),
+  y_test,
+  positive = "Yes"
+)
+
+roc_obj_xgb <- roc(
+  response = as.numeric(y_test == "Yes"),
+  predictor = xgb_probs
+)
+auc(roc_obj_xgb)
+
+plot(roc_obj_xgb, main = "XGBoost ROC Curve")
+```
+
+4. Conclusion and Interpretation
+
+```{r model comparison}
+model_results <- tibble(
+  Model = c("Logistic Regression", "Lasso Regression", "Decision Tree", 
+            "Random Forest", "XGBoost"),
+  AUC = c(
+    auc(roc_obj_log),
+    auc(roc_obj_lasso),
+    auc(roc_obj_tree),
+    auc(roc_obj_rf),
+    auc(roc_obj_xgb)
+  ),
+  Accuracy = c(
+    confusionMatrix(factor(log_preds), y_test)$overall["Accuracy"],
+    confusionMatrix(factor(lasso_preds), y_test)$overall["Accuracy"],
+    confusionMatrix(factor(tree_preds), y_test)$overall["Accuracy"],
+    confusionMatrix(factor(rf_preds), y_test)$overall["Accuracy"],
+    confusionMatrix(factor(xgb_preds, levels = c("No", "Yes")), y_test)$overall["Accuracy"]
+  ),
+  Sensitivity = c(
+    confusionMatrix(factor(log_preds), y_test)$byClass["Sensitivity"],
+    confusionMatrix(factor(lasso_preds), y_test)$byClass["Sensitivity"],
+    confusionMatrix(factor(tree_preds), y_test)$byClass["Sensitivity"],
+    confusionMatrix(factor(rf_preds), y_test)$byClass["Sensitivity"],
+    confusionMatrix(factor(xgb_preds, levels = c("No", "Yes")), y_test)$byClass["Sensitivity"]
+  ),
+  Specificity = c(
+    confusionMatrix(factor(log_preds), y_test)$byClass["Specificity"],
+    confusionMatrix(factor(lasso_preds), y_test)$byClass["Specificity"],
+    confusionMatrix(factor(tree_preds), y_test)$byClass["Specificity"],
+    confusionMatrix(factor(rf_preds), y_test)$byClass["Specificity"],
+    confusionMatrix(factor(xgb_preds, levels = c("No", "Yes")), y_test)$byClass["Specificity"]
+  )
+)
+
+model_results %>%
+  mutate(across(where(is.numeric), ~round(., 4))) %>%
+  arrange(desc(AUC)) %>%
+  knitr::kable(caption = "Model Performance Comparison")
+```
